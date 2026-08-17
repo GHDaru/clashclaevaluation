@@ -35,14 +35,28 @@ class Settings(BaseSettings):
     @field_validator("database_url", mode="before")
     @classmethod
     def normalize_database_url(cls, v: str | None) -> str | None:
-        """Ensure PostgreSQL URLs use the asyncpg driver for SQLAlchemy async.
+        """Normalize DATABASE_URL for SQLAlchemy async + asyncpg.
 
-        Railway (and most cloud providers) provision DATABASE_URL as
-        ``postgresql://user:pass@host:port/db``. SQLAlchemy's async engine
-        needs ``postgresql+asyncpg://...``. This normalizes transparently.
+        Two transformations:
+        1. ``postgresql://`` → ``postgresql+asyncpg://`` (async driver)
+        2. ``sslmode=...`` → ``ssl=...`` (asyncpg uses ``ssl``, not ``sslmode``)
+
+        Cloud providers (Neon, Railway, Render) provision DATABASE_URL as
+        ``postgresql://user:pass@host/db?sslmode=require``. SQLAlchemy's
+        async engine needs the asyncpg driver, and asyncpg's connect() does
+        not accept the libpq ``sslmode`` keyword.
         """
-        if v and v.startswith("postgresql://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if not v:
+            return v
+
+        # 1. Switch to asyncpg driver
+        if v.startswith("postgresql://"):
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # 2. Convert sslmode → ssl for asyncpg compatibility
+        if "sslmode=" in v:
+            v = v.replace("sslmode=", "ssl=")
+
         return v
 
 
