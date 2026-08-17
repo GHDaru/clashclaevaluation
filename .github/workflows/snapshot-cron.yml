@@ -1,0 +1,33 @@
+name: Daily War Snapshot
+
+on:
+  schedule:
+    # 05:30 UTC Thu-Sun (war days) — after the ~05:00 UTC daily reset
+    - cron: "30 5 * * 4-7"
+  workflow_dispatch:
+    # Manual trigger for backfill
+
+jobs:
+  collect:
+    name: Collect Snapshot
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger snapshot collection
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${{ secrets.BACKEND_URL }}/api/v1/snapshots/collect?clan_tag=${{ secrets.CR_CLAN_TAG }}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -n -1)
+
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" -ge 400 ]; then
+            echo "::error::Snapshot collection failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "::notice::Snapshot collection completed: $BODY"
