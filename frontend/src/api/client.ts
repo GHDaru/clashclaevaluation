@@ -7,7 +7,11 @@ import type {
   PlayerHistoryDTO,
 } from "../types/domain";
 
-const BASE_URL = "/api/v1";
+// In dev: Vite proxy forwards /api/v1 to localhost:8002
+// In prod (Vercel): VITE_API_URL points to the Railway backend
+const BASE_URL = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api/v1`
+  : "/api/v1";
 
 async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {
