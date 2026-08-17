@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 # Always resolve .env relative to this file (backend/infrastructure/ → backend/.env)
@@ -30,6 +31,19 @@ class Settings(BaseSettings):
     history_months: int = 3
 
     model_config = {"env_file": str(_ENV_PATH), "env_file_encoding": "utf-8"}
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str | None) -> str | None:
+        """Ensure PostgreSQL URLs use the asyncpg driver for SQLAlchemy async.
+
+        Railway (and most cloud providers) provision DATABASE_URL as
+        ``postgresql://user:pass@host:port/db``. SQLAlchemy's async engine
+        needs ``postgresql+asyncpg://...``. This normalizes transparently.
+        """
+        if v and v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
 
 
 settings = Settings()
