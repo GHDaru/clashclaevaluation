@@ -215,3 +215,21 @@ def derive_per_day_attacks(
         prior = snap
 
     return result
+
+
+@dataclass
+class SnapshotRun:
+    """Audit record for one execution of the snapshot collection script.
+
+    Records the outcome (success / failure / no_war) so that missing
+    snapshots can be detected and backfilled.
+    """
+
+    war_id: int | None
+    clan_tag: str
+    snapshot_date: date
+    status: str  # "success", "failure", "no_war"
+    participants_captured: int = 0
+    error_message: str | None = None
+    triggered_by: str = "cron"  # "cron" or "manual"
+    captured_at: datetime | None = None

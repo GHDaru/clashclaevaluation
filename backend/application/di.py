@@ -6,6 +6,8 @@ This is the composition root: the only place that knows about concrete implement
 from functools import lru_cache
 
 from application.port.primary.use_cases import (
+    CheckCompletenessUseCase,
+    CollectSnapshotUseCase,
     EvaluateClanUseCase,
     GetClanStatusUseCase,
     GetPlayerHistoryUseCase,
@@ -14,7 +16,9 @@ from application.port.secondary.cr_api_client import CRApiClient
 from application.port.secondary.repositories import (
     PlayerRepository,
     PlayerWarRepository,
+    SnapshotRunRepository,
     WarRepository,
+    WarSnapshotRepository,
 )
 from domain.service.evaluation import EvaluationConfig, EvaluationService
 from domain.service.relaxation import RelaxationService
@@ -73,6 +77,18 @@ def get_player_war_repo() -> PlayerWarRepository:
     return SqlPlayerWarRepository(async_session())
 
 
+def get_war_snapshot_repo() -> WarSnapshotRepository:
+    from infrastructure.adapter.secondary.sql_repositories import SqlWarSnapshotRepository
+    from infrastructure.orm.database import async_session
+    return SqlWarSnapshotRepository(async_session())
+
+
+def get_snapshot_run_repo() -> SnapshotRunRepository:
+    from infrastructure.adapter.secondary.sql_repositories import SqlSnapshotRunRepository
+    from infrastructure.orm.database import async_session
+    return SqlSnapshotRunRepository(async_session())
+
+
 def get_clan_status_use_case() -> GetClanStatusUseCase:
     return GetClanStatusUseCase(
         war_repo=get_war_repo(),
@@ -89,6 +105,7 @@ def get_evaluate_use_case() -> EvaluateClanUseCase:
         cr_api=get_cr_api_client(),
         evaluation_service=get_evaluation_service(),
         relaxation_service=get_relaxation_service(),
+        snapshot_repo=get_war_snapshot_repo(),
     )
 
 
@@ -99,4 +116,20 @@ def get_player_history_use_case() -> GetPlayerHistoryUseCase:
         cr_api=get_cr_api_client(),
         clan_tag=get_settings().cr_clan_tag,
         config=get_evaluation_config(),
+    )
+
+
+def get_collect_snapshot_use_case() -> CollectSnapshotUseCase:
+    return CollectSnapshotUseCase(
+        war_repo=get_war_repo(),
+        snapshot_repo=get_war_snapshot_repo(),
+        run_repo=get_snapshot_run_repo(),
+        cr_api=get_cr_api_client(),
+    )
+
+
+def get_check_completeness_use_case() -> CheckCompletenessUseCase:
+    return CheckCompletenessUseCase(
+        war_repo=get_war_repo(),
+        run_repo=get_snapshot_run_repo(),
     )

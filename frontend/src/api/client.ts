@@ -52,4 +52,27 @@ export const api = {
     fetchJSON<{ message: string }>("/config/defaults", {
       method: "POST",
     }),
+
+  collectSnapshot: (clanTag?: string, snapshotDate?: string) =>
+    fetchJSON<{
+      status: string;
+      war_id: number | null;
+      participants_captured: number;
+      snapshot_date: string;
+      error: string | null;
+    }>(
+      `/snapshots/collect${[
+        clanTag ? `clan_tag=${encodeURIComponent(clanTag)}` : "",
+        snapshotDate ? `snapshot_date=${snapshotDate}` : "",
+      ].filter(Boolean).join("&")}`,
+      { method: "POST" }
+    ),
+
+  checkCompleteness: (clanTag?: string) =>
+    fetchJSON<{
+      war_id: number | null;
+      expected_dates: string[];
+      missing_dates: string[];
+      is_complete: boolean;
+    }>(`/snapshots/missing${clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ""}`),
 };

@@ -9,10 +9,11 @@ from application.port.secondary.repositories import (
     ClanRepository,
     PlayerRepository,
     PlayerWarRepository,
+    SnapshotRunRepository,
     WarRepository,
     WarSnapshotRepository,
 )
-from domain.model.aggregates import PlayerWar, War, WarSnapshot, WarStatus
+from domain.model.aggregates import PlayerWar, SnapshotRun, War, WarSnapshot, WarStatus
 from domain.model.entities import Clan, Player
 from domain.model.value_objects import (
     AttackCount,
@@ -26,6 +27,7 @@ from infrastructure.orm.models import (
     ClanModel,
     PlayerModel,
     PlayerWarModel,
+    SnapshotRunModel,
     WarModel,
     WarSnapshotModel,
 )
@@ -292,19 +294,43 @@ class SqlWarSnapshotRepository(WarSnapshotRepository):
         return [self._to_domain(r) for r in result.scalars().all()]
 
     async def save(self, snapshot: WarSnapshot) -> WarSnapshot:
-        model = WarSnapshotModel(
-            war_id=snapshot.war_id,
-            player_tag=str(snapshot.player_tag),
-            player_name=snapshot.player_name,
-            snapshot_date=snapshot.snapshot_date,
-            decks_used_at_snapshot=snapshot.decks_used_at_snapshot,
-            decks_used_today_at_snapshot=snapshot.decks_used_today_at_snapshot,
-            fame_at_snapshot=snapshot.fame_at_snapshot,
-            captured_at=snapshot.captured_at,
+        """Upsert a snapshot, idempotent on (war_id, player_tag, snapshot_date).
+
+        Queries for an existing row by the unique constraint key. If found,
+        updates it in place; otherwise inserts a new row. This avoids the
+        IntegrityError that session.merge() with id=None would raise on the
+        second run.
+        """
+        result = await self.session.execute(
+            select(WarSnapshotModel).where(
+                WarSnapshotModel.war_id == snapshot.war_id,
+                WarSnapshotModel.player_tag == str(snapshot.player_tag),
+                WarSnapshotModel.snapshot_date == snapshot.snapshot_date,
+            )
         )
-        # merge = upsert on the unique constraint
-        # (war_id, player_tag, snapshot_date) when the PK id is unset.
-        await self.session.merge(model)
+        existing = result.scalar_one_or_none()
+
+        if existing is not None:
+            # Update in place — true upsert
+            existing.player_name = snapshot.player_name
+            existing.decks_used_at_snapshot = snapshot.decks_used_at_snapshot
+            existing.decks_used_today_at_snapshot = snapshot.decks_used_today_at_snapshot
+            existing.fame_at_snapshot = snapshot.fame_at_snapshot
+            existing.captured_at = snapshot.captured_at
+        else:
+            # Insert new
+            model = WarSnapshotModel(
+                war_id=snapshot.war_id,
+                player_tag=str(snapshot.player_tag),
+                player_name=snapshot.player_name,
+                snapshot_date=snapshot.snapshot_date,
+                decks_used_at_snapshot=snapshot.decks_used_at_snapshot,
+                decks_used_today_at_snapshot=snapshot.decks_used_today_at_snapshot,
+                fame_at_snapshot=snapshot.fame_at_snapshot,
+                captured_at=snapshot.captured_at,
+            )
+            self.session.add(model)
+
         await self.session.commit()
         return snapshot
 
@@ -317,5 +343,58 @@ class SqlWarSnapshotRepository(WarSnapshotRepository):
             decks_used_at_snapshot=m.decks_used_at_snapshot,
             decks_used_today_at_snapshot=m.decks_used_today_at_snapshot,
             fame_at_snapshot=m.fame_at_snapshot,
+            captured_at=m.captured_at,
+        )
+
+
+class SqlSnapshotRunRepository(SnapshotRunRepository):
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def save(self, run: SnapshotRun) -> SnapshotRun:
+        model = SnapshotRunModel(
+            war_id=run.war_id,
+            clan_tag=run.clan_tag,
+            snapshot_date=run.snapshot_date,
+            status=run.status,
+            participants_captured=run.participants_captured,
+            error_message=run.error_message,
+            triggered_by=run.triggered_by,
+            captured_at=run.captured_at,
+        )
+        self.session.add(model)
+        await self.session.commit()
+        return run
+
+    async def get_by_war(self, war_id: int) -> list[SnapshotRun]:
+        result = await self.session.execute(
+            select(SnapshotRunModel)
+            .where(SnapshotRunModel.war_id == war_id)
+            .order_by(SnapshotRunModel.snapshot_date)
+        )
+        return [self._to_domain(r) for r in result.scalars().all()]
+
+    async def get_missing_dates(
+        self, war_id: int, expected_dates: list[date]
+    ) -> list[date]:
+        """Return expected dates that have no successful snapshot run."""
+        result = await self.session.execute(
+            select(SnapshotRunModel.snapshot_date).where(
+                SnapshotRunModel.war_id == war_id,
+                SnapshotRunModel.status == "success",
+            )
+        )
+        successful_dates = set(result.scalars().all())
+        return [d for d in expected_dates if d not in successful_dates]
+
+    def _to_domain(self, m: SnapshotRunModel) -> SnapshotRun:
+        return SnapshotRun(
+            war_id=m.war_id,
+            clan_tag=m.clan_tag,
+            snapshot_date=m.snapshot_date,
+            status=m.status,
+            participants_captured=m.participants_captured,
+            error_message=m.error_message,
+            triggered_by=m.triggered_by,
             captured_at=m.captured_at,
         )

@@ -64,12 +64,12 @@ export default function Dashboard({ data, onPlayerClick }: Props) {
                 color="yellow"
               />
               <StatChip
-                label="Fama Total"
+                label="Troféus"
                 value={(data.total_fame ?? 0).toLocaleString("pt-BR")}
                 color="green"
               />
               <StatChip
-                label="Fama Hoje"
+                label="Pontos Hoje"
                 value={(data.daily_fame ?? 0).toLocaleString("pt-BR")}
                 icon="fire"
                 color="red"

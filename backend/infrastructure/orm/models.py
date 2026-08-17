@@ -107,6 +107,27 @@ class WarSnapshotModel(Base):
     captured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class SnapshotRunModel(Base):
+    """Audit log for snapshot collection runs.
+
+    Each execution of the snapshot script (cron or manual) records one row
+    with the outcome: success, failure, or no_war. This enables completeness
+    checking — detecting war days where no snapshot was captured.
+    """
+
+    __tablename__ = "snapshot_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    war_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("wars.id"))
+    clan_tag: Mapped[str] = mapped_column(String(12))
+    snapshot_date: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(20))  # success, failure, no_war
+    participants_captured: Mapped[int] = mapped_column(Integer, default=0)
+    error_message: Mapped[str | None] = mapped_column(String(500))
+    triggered_by: Mapped[str] = mapped_column(String(20), default="cron")  # cron, manual
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class EvaluationLogModel(Base):
     __tablename__ = "evaluation_logs"
 

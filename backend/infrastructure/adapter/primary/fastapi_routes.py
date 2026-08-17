@@ -7,12 +7,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from application.di import (
+    get_check_completeness_use_case,
     get_clan_status_use_case,
+    get_collect_snapshot_use_case,
     get_evaluate_use_case,
     get_player_history_use_case,
     get_settings,
 )
 from application.port.primary.use_cases import (
+    CheckCompletenessUseCase,
+    CollectSnapshotUseCase,
     EvaluateClanUseCase,
     EvaluateCommand,
     GetClanStatusUseCase,
@@ -281,3 +285,85 @@ async def restore_defaults():
     env_path.write_text("\n".join(defaults) + "\n", encoding="utf-8")
 
     return {"message": "Defaults restored"}
+
+
+# --- Snapshot endpoints ---
+
+
+@router.post("/snapshots/collect")
+async def collect_snapshot(
+    clan_tag: str | None = None,
+    snapshot_date: str | None = None,
+    use_case: CollectSnapshotUseCase = Depends(get_collect_snapshot_use_case),
+    settings: Settings = Depends(get_settings),
+):
+    """POST /api/v1/snapshots/collect — manually trigger a snapshot collection.
+
+    Accepts optional ?clan_tag= and ?snapshot_date= (YYYY-MM-DD) query params.
+    If snapshot_date is omitted, today is used. Idempotent: re-running for the
+    same war/player/date upserts (does not duplicate).
+    """
+    from datetime import date as date_cls
+
+    effective_tag = clan_tag or settings.cr_clan_tag
+    if not effective_tag:
+        raise HTTPException(
+            status_code=400,
+            detail="Clan tag not provided. Pass ?clan_tag= or set CR_CLAN_TAG in config.",
+        )
+
+    try:
+        tag_obj = ClanTag(effective_tag if effective_tag.startswith("#") else f"#{effective_tag}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    snap_date = None
+    if snapshot_date:
+        try:
+            snap_date = date_cls.fromisoformat(snapshot_date)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid date format: {snapshot_date}. Use YYYY-MM-DD.",
+            )
+
+    result = await use_case.execute(tag_obj, snapshot_date=snap_date, triggered_by="manual")
+    return {
+        "status": result.status,
+        "war_id": result.war_id,
+        "participants_captured": result.participants_captured,
+        "snapshot_date": result.snapshot_date,
+        "error": result.error,
+    }
+
+
+@router.get("/snapshots/missing")
+async def check_completeness(
+    clan_tag: str | None = None,
+    use_case: CheckCompletenessUseCase = Depends(get_check_completeness_use_case),
+    settings: Settings = Depends(get_settings),
+):
+    """GET /api/v1/snapshots/missing — check for missing snapshot days.
+
+    Returns the expected war days (Thu-Sun) and which ones are missing
+    a successful snapshot collection.
+    """
+    effective_tag = clan_tag or settings.cr_clan_tag
+    if not effective_tag:
+        raise HTTPException(
+            status_code=400,
+            detail="Clan tag not provided. Pass ?clan_tag= or set CR_CLAN_TAG in config.",
+        )
+
+    try:
+        tag_obj = ClanTag(effective_tag if effective_tag.startswith("#") else f"#{effective_tag}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    result = await use_case.execute(tag_obj)
+    return {
+        "war_id": result.war_id,
+        "expected_dates": result.expected_dates,
+        "missing_dates": result.missing_dates,
+        "is_complete": result.is_complete,
+    }

@@ -4,15 +4,17 @@ Application services that orchestrate domain services + secondary ports.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from application.port.secondary.cr_api_client import CRApiClient
 from application.port.secondary.repositories import (
     PlayerRepository,
     PlayerWarRepository,
+    SnapshotRunRepository,
     WarRepository,
+    WarSnapshotRepository,
 )
-from domain.model.aggregates import PlayerStatus, Trend, WarStatus
+from domain.model.aggregates import PlayerStatus, SnapshotRun, Trend, WarSnapshot, WarStatus
 from domain.model.value_objects import ClanTag, PlayerTag
 from domain.service.evaluation import EvaluationConfig, EvaluationService
 from domain.service.relaxation import RelaxationService
@@ -65,6 +67,23 @@ class PlayerHistoryDTO:
 class EvaluateCommand:
     clan_tag: str
     triggered_by: str = "manual"
+
+
+@dataclass
+class SnapshotResultDTO:
+    status: str  # "success", "failure", "no_war"
+    war_id: int | None
+    participants_captured: int
+    snapshot_date: str
+    error: str | None = None
+
+
+@dataclass
+class CompletenessResultDTO:
+    war_id: int | None
+    expected_dates: list[str]
+    missing_dates: list[str]
+    is_complete: bool
 
 
 @dataclass
@@ -219,12 +238,14 @@ class EvaluateClanUseCase:
         cr_api: CRApiClient,
         evaluation_service: EvaluationService,
         relaxation_service: RelaxationService,
+        snapshot_repo: WarSnapshotRepository | None = None,
     ):
         self.war_repo = war_repo
         self.player_war_repo = player_war_repo
         self.cr_api = cr_api
         self.evaluation_service = evaluation_service
         self.relaxation_service = relaxation_service
+        self.snapshot_repo = snapshot_repo
 
     async def execute(self, command: EvaluateCommand) -> EvaluateResultDTO:
         clan_tag = ClanTag(command.clan_tag)
@@ -261,7 +282,7 @@ class EvaluateClanUseCase:
                 relaxed_days.append(i)
 
         # Build War aggregate
-        from domain.model.aggregates import PlayerWar, War
+        from domain.model.aggregates import PlayerWar, War, derive_per_day_attacks
         from domain.model.value_objects import AttackCount
 
         war = War(
@@ -274,19 +295,36 @@ class EvaluateClanUseCase:
             relaxed_days=relaxed_days,
         )
 
+        # Try to load snapshots for real per-day attack counts
+        snapshot_map: dict[str, list] = {}
+        if self.snapshot_repo is not None:
+            try:
+                existing_war = await self.war_repo.get_by_clan_and_date(
+                    ClanTag(command.clan_tag), start_date
+                )
+                if existing_war is not None:
+                    all_snaps = await self.snapshot_repo.get_by_war(existing_war.id)
+                    for snap in all_snaps:
+                        tag_key = str(snap.player_tag)
+                        snapshot_map.setdefault(tag_key, []).append(snap)
+            except Exception:
+                pass  # Snapshot query failed — use heuristic fallback
+
         for p in war_data.participants:
-            attacks = [
-                AttackCount(min(4, p.decks_used_today if i == war_data.period_index else 0))
-                for i in range(4)
-            ]
-            # Distribute total decks across days (simplified: all in current period)
-            total_decks = p.decks_used
-            attacks_per_day_avg = total_decks // 4 if total_decks > 0 else 0
-            remainder = total_decks % 4 if total_decks > 0 else 0
-            attacks = []
-            for i in range(4):
-                val = attacks_per_day_avg + (1 if i < remainder else 0)
-                attacks.append(AttackCount(min(4, val)))
+            player_snaps = snapshot_map.get(p.tag, [])
+
+            if player_snaps:
+                # Real per-day attacks from snapshot diffs
+                attacks = derive_per_day_attacks(player_snaps, start_date)
+            else:
+                # Heuristic fallback: distribute total decks evenly across days
+                total_decks = p.decks_used
+                attacks_per_day_avg = total_decks // 4 if total_decks > 0 else 0
+                remainder = total_decks % 4 if total_decks > 0 else 0
+                attacks = []
+                for i in range(4):
+                    val = attacks_per_day_avg + (1 if i < remainder else 0)
+                    attacks.append(AttackCount(min(4, val)))
 
             pw = PlayerWar(
                 player_tag=PlayerTag(p.tag),
@@ -450,4 +488,179 @@ class GetPlayerHistoryUseCase:
             current_war=current_war,
             recency={"wars": recency_wars, "trend": trend},
             history=history,
+        )
+
+
+class CollectSnapshotUseCase:
+    """Captures a daily snapshot of war progress for all participants.
+
+    Fetches the current war data from the CR API, upserts a snapshot per
+    participant, and logs the run for auditability. Idempotent: re-running
+    for the same war/player/date updates the existing snapshot (upsert).
+    """
+
+    def __init__(
+        self,
+        war_repo: WarRepository,
+        snapshot_repo: WarSnapshotRepository,
+        run_repo: SnapshotRunRepository,
+        cr_api: CRApiClient,
+    ):
+        self.war_repo = war_repo
+        self.snapshot_repo = snapshot_repo
+        self.run_repo = run_repo
+        self.cr_api = cr_api
+
+    async def execute(
+        self,
+        clan_tag: ClanTag,
+        snapshot_date: date | None = None,
+        triggered_by: str = "cron",
+    ) -> SnapshotResultDTO:
+        from datetime import date as date_cls, datetime, timedelta
+
+        if snapshot_date is None:
+            snapshot_date = date_cls.today()
+
+        try:
+            war_data = await self.cr_api.get_current_war(clan_tag)
+        except Exception as e:
+            await self._log_run(
+                None, str(clan_tag), snapshot_date, "failure",
+                0, str(e)[:500], triggered_by,
+            )
+            return SnapshotResultDTO(
+                status="failure",
+                war_id=None,
+                participants_captured=0,
+                snapshot_date=snapshot_date.isoformat(),
+                error=str(e)[:500],
+            )
+
+        if war_data is None or war_data.state not in ("active", "full", "warDay"):
+            await self._log_run(
+                None, str(clan_tag), snapshot_date, "no_war",
+                0, None, triggered_by,
+            )
+            return SnapshotResultDTO(
+                status="no_war",
+                war_id=None,
+                participants_captured=0,
+                snapshot_date=snapshot_date.isoformat(),
+            )
+
+        # Find or create the war record
+        today = date_cls.today()
+        start_date = today - timedelta(days=today.weekday() - 3)
+        if today.weekday() < 3:
+            start_date = start_date - timedelta(weeks=1)
+        end_date = start_date + timedelta(days=3)
+
+        war = await self.war_repo.get_by_clan_and_date(clan_tag, start_date)
+        war_id = war.id if war else None
+
+        if war_id is None:
+            # Create a minimal war record so snapshots have an FK target
+            from domain.model.aggregates import War
+            war = War(
+                id=None,
+                clan_tag=str(clan_tag),
+                start_date=start_date,
+                end_date=end_date,
+                status=WarStatus.FINISHED_1ST,
+                total_fame=war_data.clan_score,
+                relaxed_days=[],
+            )
+            saved_war = await self.war_repo.save(war)
+            war_id = saved_war.id
+
+        # Upsert a snapshot per participant
+        now = datetime.utcnow()
+        captured = 0
+        for p in war_data.participants:
+            snapshot = WarSnapshot(
+                war_id=war_id,
+                player_tag=PlayerTag(p.tag),
+                player_name=p.name,
+                snapshot_date=snapshot_date,
+                decks_used_at_snapshot=p.decks_used,
+                decks_used_today_at_snapshot=p.decks_used_today,
+                fame_at_snapshot=p.fame,
+                captured_at=now,
+            )
+            await self.snapshot_repo.save(snapshot)
+            captured += 1
+
+        await self._log_run(
+            war_id, str(clan_tag), snapshot_date, "success",
+            captured, None, triggered_by,
+        )
+
+        return SnapshotResultDTO(
+            status="success",
+            war_id=war_id,
+            participants_captured=captured,
+            snapshot_date=snapshot_date.isoformat(),
+        )
+
+    async def _log_run(
+        self,
+        war_id: int | None,
+        clan_tag: str,
+        snapshot_date: date,
+        status: str,
+        participants: int,
+        error: str | None,
+        triggered_by: str,
+    ) -> None:
+        from datetime import datetime
+        run = SnapshotRun(
+            war_id=war_id,
+            clan_tag=clan_tag,
+            snapshot_date=snapshot_date,
+            status=status,
+            participants_captured=participants,
+            error_message=error,
+            triggered_by=triggered_by,
+            captured_at=datetime.utcnow(),
+        )
+        await self.run_repo.save(run)
+
+
+class CheckCompletenessUseCase:
+    """Detects war days that are missing snapshots."""
+
+    def __init__(
+        self,
+        war_repo: WarRepository,
+        run_repo: SnapshotRunRepository,
+    ):
+        self.war_repo = war_repo
+        self.run_repo = run_repo
+
+    async def execute(self, clan_tag: ClanTag) -> CompletenessResultDTO:
+        from datetime import date as date_cls, timedelta
+
+        today = date_cls.today()
+        start_date = today - timedelta(days=today.weekday() - 3)
+        if today.weekday() < 3:
+            start_date = start_date - timedelta(weeks=1)
+
+        expected_dates = [start_date + timedelta(days=i) for i in range(4)]
+
+        war = await self.war_repo.get_by_clan_and_date(clan_tag, start_date)
+        if war is None:
+            return CompletenessResultDTO(
+                war_id=None,
+                expected_dates=[d.isoformat() for d in expected_dates],
+                missing_dates=[d.isoformat() for d in expected_dates],
+                is_complete=False,
+            )
+
+        missing = await self.run_repo.get_missing_dates(war.id, expected_dates)
+        return CompletenessResultDTO(
+            war_id=war.id,
+            expected_dates=[d.isoformat() for d in expected_dates],
+            missing_dates=[d.isoformat() for d in missing],
+            is_complete=len(missing) == 0,
         )
