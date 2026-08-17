@@ -20,6 +20,9 @@ dependencies = [
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["application*", "domain*", "infrastructure*", "scripts*"]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.3.0",
