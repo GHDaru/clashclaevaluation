@@ -1,0 +1,179 @@
+# API Contracts — ClashClanEvaluation Backend
+# OpenAPI 3.0 subset — defines the REST interface between Frontend (React) and Backend (FastAPI)
+
+servers:
+  - url: http://localhost:8000/api/v1
+    description: Development server
+
+paths:
+  /clan/status:
+    get:
+      summary: Current war status for the whole clan
+      responses:
+        '200':
+          body:
+            type: object
+            properties:
+              war_active: bool
+              war:
+                type: object
+                properties:
+                  id: int
+                  day: int           # 0=Thu, 1=Fri, 2=Sat, 3=Sun
+                  day_label: str     # "Quinta", "Sexta", "Sábado", "Domingo"
+                  status: str        # "active" | "finished"
+                  position: int      # 1-5
+                  total_fame: int
+                  relaxed: bool      # true if early victory
+              players:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    tag: str
+                    name: str
+                    role: str
+                    attacks_today: int    # 0-4
+                    attacks_total: int    # 0-16
+                    total_points: int
+                    yellow_cards: int
+                    red_cards: int
+                    black_cards: int
+                    status: str           # "clean", "warning", "danger", "critical"
+                    trend: str            # "improving", "stable", "declining", "new"
+
+  /players/{player_tag}:
+    get:
+      summary: Player detail and history
+      parameters:
+        - name: player_tag
+          in: path
+          type: str
+        - name: expand
+          in: query
+          type: bool
+          default: false
+      responses:
+        '200':
+          body:
+            type: object
+            properties:
+              player:
+                type: object
+                properties:
+                  tag: str
+                  name: str
+                  role: str
+                  first_seen: str     # ISO date
+                  last_seen: str      # ISO date
+              current_war:
+                type: object
+                properties:
+                  war_id: int
+                  attacks: [int, int, int, int]   # [day1, day2, day3, day4]
+                  total_points: int
+                  yellow_cards: int
+                  red_cards: int
+                  black_cards: int
+              recency:
+                type: object
+                properties:
+                  weeks: int         # configured recency window
+                  total_yellow: int
+                  total_red: int
+                  total_black: int
+                  trend: str
+              history:
+                type: array          # last 4 wars (12 if expand=true)
+                items:
+                  type: object
+                  properties:
+                    war_id: int
+                    start_date: str
+                    attacks: [int, int, int, int]
+                    total_points: int
+                    yellow_cards: int
+                    red_cards: int
+                    black_cards: int
+
+  /wars:
+    get:
+      summary: List past wars
+      parameters:
+        - name: limit
+          in: query
+          type: int
+          default: 12
+      responses:
+        '200':
+          body:
+            type: array
+            items:
+              type: object
+              properties:
+                id: int
+                start_date: str
+                end_date: str
+                status: str
+                total_fame: int
+                player_count: int
+
+  /wars/{war_id}:
+    get:
+      summary: Detail of one war (all players)
+      responses:
+        '200':
+          body:
+            type: object
+            properties:
+              war: { id, start_date, end_date, status, total_fame, relaxed_days }
+              players:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    tag: str
+                    name: str
+                    attacks: [int, int, int, int]
+                    total_points: int
+                    yellow_cards: int
+                    red_cards: int
+                    black_cards: int
+
+  /evaluate:
+    post:
+      summary: Trigger evaluation for current war
+      responses:
+        '200':
+          body:
+            type: object
+            properties:
+              war_id: int
+              evaluated_at: str
+              players_evaluated: int
+              summary:
+                clean: int
+                warnings: int
+                danger: int
+                critical: int
+
+  /config:
+    get:
+      summary: Get current configuration
+      responses:
+        '200':
+          body: { type: object }  # See M4 config schema
+    put:
+      summary: Update configuration
+      requestBody:
+        type: object               # Partial or full M4 config
+      responses:
+        '200':
+          body: { type: object }
+
+  /config/defaults:
+    post:
+      summary: Restore default configuration
+      responses:
+        '200':
+          body: { type: object }
