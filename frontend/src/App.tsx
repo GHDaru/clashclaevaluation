@@ -2,7 +2,6 @@ import { useState, useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./api/client";
 import Landing from "./pages/Landing";
-import PlayerLookup from "./pages/PlayerLookup";
 import Dashboard from "./pages/Dashboard";
 import ConfigPanel from "./pages/ConfigPanel";
 import PlayerDetail from "./pages/PlayerDetail";
@@ -14,24 +13,25 @@ import { Card } from "./components/Card";
 import { Icon } from "./components/Icon";
 import type { ClanStatusDTO } from "./types/domain";
 
-type Page = "landing" | "playerLookup" | "dashboard" | "config" | "player";
+type Page = "landing" | "dashboard" | "config" | "player";
 
 function AppContent() {
   const [page, setPage] = useState<Page>("landing");
+  const [clanTag, setClanTag] = useState<string>("");
   const [selectedPlayer, setSelectedPlayer] = useState<string>("");
   const queryClient = useQueryClient();
   const toast = useToast();
 
   const { data, isLoading, error } = useQuery<ClanStatusDTO>({
-    queryKey: ["clanStatus"],
-    queryFn: api.getClanStatus,
+    queryKey: ["clanStatus", clanTag],
+    queryFn: () => api.getClanStatus(clanTag || undefined),
     enabled: page === "dashboard" || page === "config",
   });
 
   const evalMutation = useMutation({
     mutationFn: () => api.triggerEvaluation(),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["clanStatus"] });
+      queryClient.invalidateQueries({ queryKey: ["clanStatus", clanTag] });
       toast.success(
         `Avaliação concluída: ${result.players_evaluated} jogadores · ${result.summary?.critical ?? 0} críticos`
       );
@@ -52,12 +52,17 @@ function AppContent() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  const handlePlayerClick = (tag: string) => {
+  const handleClanView = (tag: string) => {
+    setClanTag(tag);
+    navigate("dashboard");
+  };
+
+  const handlePlayerView = (tag: string) => {
     setSelectedPlayer(tag);
     navigate("player");
   };
 
-  const handlePlayerLookup = (tag: string) => {
+  const handlePlayerClick = (tag: string) => {
     setSelectedPlayer(tag);
     navigate("player");
   };
@@ -74,28 +79,7 @@ function AppContent() {
         showConfig={true}
         onHome={goHome}
       >
-        <Landing
-          onClanView={() => navigate("dashboard")}
-          onPlayerView={() => navigate("playerLookup")}
-        />
-      </Layout>
-    );
-  }
-
-  // --- Player Lookup page ---
-  if (page === "playerLookup") {
-    return (
-      <Layout
-        onEvaluate={() => navigate("dashboard")}
-        onConfig={() => navigate("dashboard")}
-        evaluating={false}
-        showConfig={true}
-        onHome={goHome}
-      >
-        <PlayerLookup
-          onSubmit={handlePlayerLookup}
-          onBack={() => navigate("landing")}
-        />
+        <Landing onClanView={handleClanView} onPlayerView={handlePlayerView} />
       </Layout>
     );
   }
@@ -164,11 +148,11 @@ function AppContent() {
           <div className="flex flex-col items-center gap-4">
             <Icon name="alert" size={48} className="text-[var(--color-danger)]" />
             <div>
-              <h2 className="text-lg font-bold text-[var(--color-text-primary)] mb-1">
+              <h3 className="text-lg font-bold text-[var(--color-text-primary)] mb-1">
                 Erro ao carregar dados
-              </h2>
+              </h3>
               <p className="text-sm text-[var(--color-text-secondary)]">
-                Verifique se o backend está rodando e se a tag do clã está configurada.
+                Verifique se o backend está rodando e se a tag do clã está correta.
               </p>
             </div>
             <Button variant="primary" iconLeft="cog" onClick={() => navigate("config")}>
@@ -189,7 +173,7 @@ function AppContent() {
       onHome={goHome}
     >
       <Dashboard
-        data={data ?? { war_active: false, war_id: null, day: null, day_label: null, status: null, position: null, total_fame: 0, daily_fame: 0, clans_count: 0, relaxed: false, players: [] }}
+        data={data ?? { war_active: false, war_id: null, day: null, day_label: null, status: null, position: null, total_fame: 0, daily_fame: 0, clans_count: 0, relaxed: false, players: [] as ClanStatusDTO["players"] }}
         onPlayerClick={handlePlayerClick}
       />
     </Layout>

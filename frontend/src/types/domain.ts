@@ -12,6 +12,7 @@ export interface PlayerStatusDTO {
   black_cards: number;
   status: "clean" | "warning" | "danger" | "critical";
   trend: "improving" | "stable" | "declining" | "new";
+  in_clan: boolean;
 }
 
 export interface ClanStatusDTO {

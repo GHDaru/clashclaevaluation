@@ -42,21 +42,26 @@ class ConfigUpdate(BaseModel):
 
 @router.get("/clan/status")
 async def get_clan_status(
+    clan_tag: str | None = None,
     use_case: GetClanStatusUseCase = Depends(get_clan_status_use_case),
     settings: Settings = Depends(get_settings),
 ):
-    """GET /api/v1/clan/status — current War status for the whole clan."""
-    if not settings.cr_clan_tag:
+    """GET /api/v1/clan/status — current War status for the whole clan.
+
+    Accepts optional ?clan_tag= query param to override the configured clan.
+    """
+    effective_tag = clan_tag or settings.cr_clan_tag
+    if not effective_tag:
         raise HTTPException(
             status_code=400,
-            detail="Clan tag not configured. Set CR_CLAN_TAG in config.",
+            detail="Clan tag not provided. Pass ?clan_tag= or set CR_CLAN_TAG in config.",
         )
     try:
-        clan_tag = ClanTag(settings.cr_clan_tag)
+        clan_tag_obj = ClanTag(effective_tag if effective_tag.startswith("#") else f"#{effective_tag}")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    result = await use_case.execute(clan_tag)
+    result = await use_case.execute(clan_tag_obj)
     return {
         "war_active": result.war_active,
         "war_id": result.war_id,
@@ -81,6 +86,7 @@ async def get_clan_status(
                 "black_cards": p.black_cards,
                 "status": p.status,
                 "trend": p.trend,
+                "in_clan": p.in_clan,
             }
             for p in result.players
         ],

@@ -69,6 +69,9 @@ class CRApiClient(ABC):
     async def get_clan(self, tag: ClanTag) -> ClanInfo: ...
 
     @abstractmethod
+    async def get_clan_members(self, tag: ClanTag) -> list[str]: ...
+
+    @abstractmethod
     async def get_current_war(self, tag: ClanTag) -> CurrentWarData | None: ...
 
     @abstractmethod

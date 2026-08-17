@@ -10,8 +10,9 @@ from application.port.secondary.repositories import (
     PlayerRepository,
     PlayerWarRepository,
     WarRepository,
+    WarSnapshotRepository,
 )
-from domain.model.aggregates import PlayerWar, War, WarStatus
+from domain.model.aggregates import PlayerWar, War, WarSnapshot, WarStatus
 from domain.model.entities import Clan, Player
 from domain.model.value_objects import (
     AttackCount,
@@ -26,6 +27,7 @@ from infrastructure.orm.models import (
     PlayerModel,
     PlayerWarModel,
     WarModel,
+    WarSnapshotModel,
 )
 
 
@@ -259,3 +261,61 @@ class SqlWarRepository(WarRepository):
 
         await self.session.commit()
         return war
+
+
+class SqlWarSnapshotRepository(WarSnapshotRepository):
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_by_war(self, war_id: int) -> list[WarSnapshot]:
+        result = await self.session.execute(
+            select(WarSnapshotModel)
+            .where(WarSnapshotModel.war_id == war_id)
+            .order_by(
+                WarSnapshotModel.player_tag,
+                WarSnapshotModel.snapshot_date,
+            )
+        )
+        return [self._to_domain(r) for r in result.scalars().all()]
+
+    async def get_by_war_and_player(
+        self, war_id: int, player_tag: PlayerTag
+    ) -> list[WarSnapshot]:
+        result = await self.session.execute(
+            select(WarSnapshotModel)
+            .where(
+                WarSnapshotModel.war_id == war_id,
+                WarSnapshotModel.player_tag == str(player_tag),
+            )
+            .order_by(WarSnapshotModel.snapshot_date)
+        )
+        return [self._to_domain(r) for r in result.scalars().all()]
+
+    async def save(self, snapshot: WarSnapshot) -> WarSnapshot:
+        model = WarSnapshotModel(
+            war_id=snapshot.war_id,
+            player_tag=str(snapshot.player_tag),
+            player_name=snapshot.player_name,
+            snapshot_date=snapshot.snapshot_date,
+            decks_used_at_snapshot=snapshot.decks_used_at_snapshot,
+            decks_used_today_at_snapshot=snapshot.decks_used_today_at_snapshot,
+            fame_at_snapshot=snapshot.fame_at_snapshot,
+            captured_at=snapshot.captured_at,
+        )
+        # merge = upsert on the unique constraint
+        # (war_id, player_tag, snapshot_date) when the PK id is unset.
+        await self.session.merge(model)
+        await self.session.commit()
+        return snapshot
+
+    def _to_domain(self, m: WarSnapshotModel) -> WarSnapshot:
+        return WarSnapshot(
+            war_id=m.war_id,
+            player_tag=PlayerTag(m.player_tag),
+            player_name=m.player_name,
+            snapshot_date=m.snapshot_date,
+            decks_used_at_snapshot=m.decks_used_at_snapshot,
+            decks_used_today_at_snapshot=m.decks_used_today_at_snapshot,
+            fame_at_snapshot=m.fame_at_snapshot,
+            captured_at=m.captured_at,
+        )

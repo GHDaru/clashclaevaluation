@@ -132,12 +132,16 @@ export default function PlayerDetail({ playerTag, onBack }: Props) {
 
       {/* Current War */}
       <Card className="p-5">
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-2">
           <Icon name="bolt" size={18} className="text-[var(--color-accent)]" />
           <h2 className="text-lg font-bold text-[var(--color-text-primary)]">
             Guerra Atual
           </h2>
         </div>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-4 leading-relaxed">
+          A guerra dura 4 dias (qui-dom). Cada jogador tem 4 ataques por dia. Cartão amarelo = faltou ataque no dia.
+          Vermelho = acúmulo de amarelos. Preto = candidato à expulsão.
+        </p>
         {data.current_war ? (
           <>
             <div className="grid grid-cols-4 gap-3 mb-4">
@@ -189,12 +193,16 @@ export default function PlayerDetail({ playerTag, onBack }: Props) {
 
       {/* Recency */}
       <Card className="p-5">
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-2">
           <Icon name="trophy" size={18} className="text-[var(--color-accent)]" />
           <h2 className="text-lg font-bold text-[var(--color-text-primary)]">
             Recência — Corrida dos Campeões
           </h2>
         </div>
+        <p className="text-xs text-[var(--color-text-tertiary)] mb-4 leading-relaxed">
+          Últimas 4 semanas. A tendência compara cartões amarelos recentes vs anteriores:
+          melhorando (menos faltas), estável ou declinando (mais faltas).
+        </p>
         <div className="flex items-center gap-3 mb-4">
           <span className="text-sm text-[var(--color-text-secondary)]">Tendência:</span>
           <TrendIndicator

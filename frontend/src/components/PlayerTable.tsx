@@ -35,6 +35,7 @@ export function PlayerTable({ players, onPlayerClick }: PlayerTableProps) {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [search, setSearch] = useState("");
   const [onlyWarPlayers, setOnlyWarPlayers] = useState(false);
+  const [onlyCurrentMembers, setOnlyCurrentMembers] = useState(false);
 
   const filtered = useMemo(() => {
     let result = players;
@@ -42,6 +43,11 @@ export function PlayerTable({ players, onPlayerClick }: PlayerTableProps) {
     // Filter: only current war players (attacks_total > 0)
     if (onlyWarPlayers) {
       result = result.filter((p) => (p.attacks_total ?? 0) > 0);
+    }
+
+    // Filter: only current clan members (in_clan === true)
+    if (onlyCurrentMembers) {
+      result = result.filter((p) => p.in_clan !== false);
     }
 
     // Filter: search by name
@@ -53,7 +59,7 @@ export function PlayerTable({ players, onPlayerClick }: PlayerTableProps) {
     }
 
     return result;
-  }, [players, onlyWarPlayers, search]);
+  }, [players, onlyWarPlayers, onlyCurrentMembers, search]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -134,6 +140,17 @@ export function PlayerTable({ players, onPlayerClick }: PlayerTableProps) {
           >
             <Icon name="sword" size={14} />
             Só da guerra atual
+          </button>
+          <button
+            onClick={() => setOnlyCurrentMembers(!onlyCurrentMembers)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-[var(--radius-sm)] text-xs font-medium transition-all ${
+              onlyCurrentMembers
+                ? "bg-[var(--color-primary)] text-white"
+                : "bg-[var(--color-surface-1)] text-[var(--color-text-secondary)] border border-[var(--color-border)]"
+            }`}
+          >
+            <Icon name="users" size={14} />
+            Só membros atuais
           </button>
           <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">
             {sorted.length} / {players.length}
@@ -232,9 +249,15 @@ export function PlayerTable({ players, onPlayerClick }: PlayerTableProps) {
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-[var(--color-text-primary)] truncate">
+                              <span className={`font-medium truncate ${p.in_clan === false ? "text-[var(--color-text-tertiary)]" : "text-[var(--color-text-primary)]"}`}>
                                 {p.name}
                               </span>
+                              {p.in_clan === false && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[10px] font-semibold bg-[var(--color-card-red-bg)] text-[var(--color-card-red)] whitespace-nowrap">
+                                  <Icon name="x" size={10} />
+                                  Ex-membro
+                                </span>
+                              )}
                               {hasTrend && <TrendIndicator trend={p.trend} />}
                             </div>
                             <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">

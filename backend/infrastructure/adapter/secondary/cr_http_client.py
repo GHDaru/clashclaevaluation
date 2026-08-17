@@ -44,6 +44,17 @@ class HttpCRApiClient(CRApiClient):
                 member_count=data["members"],
             )
 
+    async def get_clan_members(self, tag: ClanTag) -> list[str]:
+        """Returns list of member tags currently in the clan."""
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{self.base_url}/clans/{self._encode_tag(tag)}/members",
+                headers=self.headers,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return [m["tag"] for m in data.get("items", [])]
+
     async def get_current_war(self, tag: ClanTag) -> CurrentWarData | None:
         async with httpx.AsyncClient() as client:
             resp = await client.get(

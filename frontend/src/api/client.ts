@@ -21,7 +21,8 @@ async function fetchJSON<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  getClanStatus: () => fetchJSON<ClanStatusDTO>("/clan/status"),
+  getClanStatus: (clanTag?: string) =>
+    fetchJSON<ClanStatusDTO>(`/clan/status${clanTag ? `?clan_tag=${encodeURIComponent(clanTag)}` : ""}`),
 
   getPlayerHistory: (tag: string, expand = false) =>
     fetchJSON<PlayerHistoryDTO>(

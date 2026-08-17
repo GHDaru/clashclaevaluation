@@ -7,7 +7,7 @@ Domain and Application depend on these interfaces, never on implementations.
 from abc import ABC, abstractmethod
 from datetime import date
 
-from domain.model.aggregates import PlayerWar, War
+from domain.model.aggregates import PlayerWar, War, WarSnapshot
 from domain.model.entities import Clan, Player
 from domain.model.value_objects import ClanTag, PlayerTag
 
@@ -63,3 +63,26 @@ class ClanRepository(ABC):
 
     @abstractmethod
     async def save(self, clan: Clan) -> Clan: ...
+
+
+class WarSnapshotRepository(ABC):
+    """Repository for WarSnapshot — daily war progress captures."""
+
+    @abstractmethod
+    async def get_by_war(
+        self, war_id: int
+    ) -> list[WarSnapshot]:
+        """Return all snapshots for a war, across all players and days."""
+        ...
+
+    @abstractmethod
+    async def get_by_war_and_player(
+        self, war_id: int, player_tag: PlayerTag
+    ) -> list[WarSnapshot]:
+        """Return all snapshots for one player in a war, ordered by date."""
+        ...
+
+    @abstractmethod
+    async def save(self, snapshot: WarSnapshot) -> WarSnapshot:
+        """Upsert a snapshot (idempotent on war_id + player_tag + snapshot_date)."""
+        ...

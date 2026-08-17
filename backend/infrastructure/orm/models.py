@@ -67,6 +67,46 @@ class PlayerWarModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class WarSnapshotModel(Base):
+    """Daily snapshot of a participant's cumulative war progress.
+
+    The Clash Royale API (/clans/{tag}/currentriverrace) only exposes
+    cumulative counters (decksUsed, decksUsedToday, fame) with no per-day
+    breakdown. By capturing one snapshot per war-day and diffing consecutive
+    snapshots, per-day attack counts can be reconstructed:
+
+        attacks_on_day_X = decks_used_at_snapshot(day_X)
+                          - decks_used_at_snapshot(day_X-1)
+
+    Idempotency is enforced by the unique constraint on
+    (war_id, player_tag, snapshot_date) — re-capturing a snapshot for the
+    same war/player/date performs an upsert, not a duplicate insert.
+    """
+
+    __tablename__ = "war_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "war_id",
+            "player_tag",
+            "snapshot_date",
+            name="uq_warsnapshot_war_player_date",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    war_id: Mapped[int] = mapped_column(Integer, ForeignKey("wars.id"))
+    player_tag: Mapped[str] = mapped_column(String(12), ForeignKey("players.tag"))
+    player_name: Mapped[str] = mapped_column(String(100))
+    snapshot_date: Mapped[date] = mapped_column(Date)
+    # Cumulative decksUsed from API at snapshot time (0-16 over the full war)
+    decks_used_at_snapshot: Mapped[int] = mapped_column(Integer, default=0)
+    # decksUsedToday from API at snapshot time (0-4) — cross-check for the diff
+    decks_used_today_at_snapshot: Mapped[int] = mapped_column(Integer, default=0)
+    # Cumulative fame from API at snapshot time
+    fame_at_snapshot: Mapped[int] = mapped_column(Integer, default=0)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class EvaluationLogModel(Base):
     __tablename__ = "evaluation_logs"
 

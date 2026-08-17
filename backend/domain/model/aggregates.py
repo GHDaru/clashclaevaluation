@@ -113,3 +113,105 @@ class War:
             if pw.player_tag == tag:
                 return pw
         return None
+
+
+@dataclass
+class WarSnapshot:
+    """A point-in-time capture of a player's cumulative war progress.
+
+    The Clash Royale API exposes only cumulative counters (decksUsed,
+    decksUsedToday, fame) with no per-day breakdown. By storing one
+    snapshot per war-day and diffing consecutive snapshots, per-day
+    attack counts can be reconstructed:
+
+        attacks_on_day_X = decks_used_at_snapshot(day_X)
+                          - decks_used_at_snapshot(day_X-1)
+
+    For a player's first snapshot (no prior), the prior cumulative is
+    treated as 0. This naturally handles players joining mid-war.
+
+    Part of the War aggregate — War is the aggregate root.
+    """
+
+    war_id: int
+    player_tag: PlayerTag
+    player_name: str
+    snapshot_date: date
+    # Cumulative decksUsed from API (0-16 over the full war)
+    decks_used_at_snapshot: int
+    # decksUsedToday from API (0-4) — cross-check for the diff
+    decks_used_today_at_snapshot: int
+    # Cumulative fame from API
+    fame_at_snapshot: int
+    captured_at: datetime | None = None
+
+    def attacks_since(self, prior: "WarSnapshot | None") -> int:
+        """Attacks performed between the prior snapshot and this one.
+
+        If *prior* is ``None`` the player had no earlier snapshot (first
+        capture, or joined mid-war) so the full cumulative is returned.
+        """
+        prior_decks = prior.decks_used_at_snapshot if prior else 0
+        return self.decks_used_at_snapshot - prior_decks
+
+    def fame_since(self, prior: "WarSnapshot | None") -> int:
+        """Fame earned between the prior snapshot and this one."""
+        prior_fame = prior.fame_at_snapshot if prior else 0
+        return self.fame_at_snapshot - prior_fame
+
+
+def derive_per_day_attacks(
+    snapshots: list[WarSnapshot],
+    war_start_date: date,
+) -> list[AttackCount]:
+    """Derive per-day attack counts (day1..day4) from snapshots.
+
+    *snapshots* must all belong to the same player and the same war.
+    They are sorted internally by ``snapshot_date``.
+
+    Each war day is Thursday→Sunday (offset 0-3 from *war_start_date*).
+
+    Strategy:
+      1. When a snapshot exists for a day, prefer ``decks_used_today_at_snapshot``
+         (the API's own per-day count) as the authoritative value.
+      2. Fall back to the cumulative diff (``decks_used_at_snapshot`` minus
+         the prior snapshot's cumulative) when the API's today-count is 0
+         but the diff is positive — this catches edge cases where the API
+         resets ``decksUsedToday`` before we capture the snapshot.
+      3. Days with no snapshot default to 0 attacks.
+
+    If a snapshot is missing for a day, the cumulative diff "rolls forward"
+    to the next available snapshot. Because ``decks_used_today_at_snapshot``
+    is used as the primary value, the missing day is correctly attributed 0
+    and the next day gets its own per-day count from the API.
+
+    Returns a list of exactly 4 ``AttackCount`` values.
+    """
+    ordered = sorted(snapshots, key=lambda s: s.snapshot_date)
+
+    # Map each snapshot to its war-day index (0-3).
+    day_map: dict[int, WarSnapshot] = {}
+    for snap in ordered:
+        offset = (snap.snapshot_date - war_start_date).days
+        if 0 <= offset <= 3:
+            day_map[offset] = snap
+
+    result: list[AttackCount] = []
+    prior: WarSnapshot | None = None
+    for day_index in range(4):
+        snap = day_map.get(day_index)
+        if snap is None:
+            # No snapshot for this day — 0 attacks, prior unchanged.
+            result.append(AttackCount(0))
+            continue
+
+        # Prefer the API's own per-day count; fall back to the diff.
+        diff = snap.attacks_since(prior)
+        today = snap.decks_used_today_at_snapshot
+        attacks = today if today > 0 else diff
+        # Cap at 4 — physical maximum per war day.
+        attacks = min(attacks, 4)
+        result.append(AttackCount(attacks))
+        prior = snap
+
+    return result

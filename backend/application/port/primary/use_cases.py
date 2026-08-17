@@ -46,6 +46,7 @@ class PlayerStatusDTO:
     black_cards: int
     status: str
     trend: str
+    in_clan: bool
 
 
 @dataclass
@@ -129,6 +130,12 @@ class GetClanStatusUseCase:
         war_id = war.id if war else None
         relaxed = war.is_day_relaxed(day) if war else False
 
+        # Fetch current clan members to distinguish active members from ex-members
+        try:
+            member_tags = set(await self.cr_api.get_clan_members(clan_tag))
+        except Exception:
+            member_tags = None  # API unavailable — don't mark anyone as ex-member
+
         # Build player status from API participants
         players: list[PlayerStatusDTO] = []
 
@@ -158,6 +165,8 @@ class GetClanStatusUseCase:
             else:
                 status = PlayerStatus.CLEAN.value
 
+            in_clan = member_tags is None or p.tag in member_tags
+
             players.append(
                 PlayerStatusDTO(
                     tag=p.tag,
@@ -171,6 +180,7 @@ class GetClanStatusUseCase:
                     black_cards=black,
                     status=status,
                     trend=Trend.STABLE.value,
+                    in_clan=in_clan,
                 )
             )
 
