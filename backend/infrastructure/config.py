@@ -57,6 +57,15 @@ class Settings(BaseSettings):
         if "sslmode=" in v:
             v = v.replace("sslmode=", "ssl=")
 
+        # 3. Strip channel_binding — asyncpg doesn't accept this libpq param
+        #    (SSL is already enabled via ssl= above; channel binding is not
+        #    configurable in asyncpg and not required for Neon connectivity)
+        if "channel_binding=" in v:
+            import re
+            v = re.sub(r"[?&]channel_binding=[^&]*", "", v)
+            # Fix potential dangling ? if channel_binding was first param
+            v = v.replace("?&", "?")
+
         return v
 
 
