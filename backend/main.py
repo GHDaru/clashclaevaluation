@@ -33,3 +33,15 @@ app.include_router(router)
 @app.get("/")
 async def root():
     return {"name": "ClashClanEvaluation", "version": "0.1.0"}
+
+
+@app.get("/debug/ip")
+async def debug_ip():
+    """Temporary endpoint to discover the server's outbound IP."""
+    import httpx
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("https://api.ipify.org?format=json")
+            return resp.json()
+    except Exception as e:
+        return {"error": str(e)}
