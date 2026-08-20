@@ -2,8 +2,16 @@ name: Daily War Snapshot
 
 on:
   schedule:
-    # 05:30 UTC Thu-Sun (war days) — after the ~05:00 UTC daily reset
-    - cron: "30 5 * * 4-7"
+    # War cycle: Thu 07:00 UTC-3 → Mon 07:00 UTC-3 (10:00 UTC boundary)
+    # Snapshots at 10:05 UTC = 07:05 UTC-3 (right after war day reset)
+    #   Thu = baseline (everyone zero)
+    #   Fri = Day 1 results
+    #   Sat = Day 2 results
+    #   Sun = Day 3 results
+    #   Mon = Day 4 results (war end)
+    - cron: "5 10 * * 0,1,4,5,6"
+    # Mid-day collection at 22:00 UTC = 19:00 UTC-3 (evening progress)
+    - cron: "0 22 * * 4,5,6,0"
   workflow_dispatch:
     # Manual trigger for backfill
 
@@ -13,21 +21,46 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger snapshot collection
+      - name: Trigger snapshot collection (with retry)
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+          CR_CLAN_TAG: ${{ secrets.CR_CLAN_TAG }}
         run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "${{ secrets.BACKEND_URL }}/api/v1/snapshots/collect?clan_tag=${{ secrets.CR_CLAN_TAG }}" \
-            -H "Content-Type: application/json")
+          MAX_RETRIES=3
+          RETRY_DELAY=300  # 5 minutes
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -n -1)
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "--- Attempt $attempt of $MAX_RETRIES ---"
 
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $BODY"
+            RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              "${BACKEND_URL}/api/v1/snapshots/collect?clan_tag=${CR_CLAN_TAG}" \
+              -H "Content-Type: application/json" \
+              --max-time 60)
 
-          if [ "$HTTP_CODE" -ge 400 ]; then
-            echo "::error::Snapshot collection failed with HTTP $HTTP_CODE"
-            exit 1
-          fi
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | head -n -1)
 
-          echo "::notice::Snapshot collection completed: $BODY"
+            echo "HTTP Status: $HTTP_CODE"
+            echo "Response: $BODY"
+
+            if [ "$HTTP_CODE" -lt 400 ]; then
+              # Check if the response indicates success
+              STATUS=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+              if [ "$STATUS" = "success" ]; then
+                echo "::notice::Snapshot collected successfully on attempt $attempt: $BODY"
+                exit 0
+              elif [ "$STATUS" = "no_war" ]; then
+                echo "::warning::No active war on attempt $attempt"
+                # no_war is not an error — war might not have started yet
+                exit 0
+              fi
+            fi
+
+            if [ "$attempt" -lt "$MAX_RETRIES" ]; then
+              echo "Retrying in ${RETRY_DELAY}s..."
+              sleep $RETRY_DELAY
+            fi
+          done
+
+          echo "::error::Snapshot collection failed after $MAX_RETRIES attempts"
+          exit 1

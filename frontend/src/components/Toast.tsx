@@ -7,7 +7,7 @@ import {
 } from "react";
 import { Icon, type IconName } from "./Icon";
 
-type ToastType = "success" | "error" | "info";
+type ToastType = "success" | "error" | "info" | "warning";
 
 interface ToastItem {
   id: number;
@@ -20,6 +20,7 @@ interface ToastContextValue {
   success: (message: string) => void;
   error: (message: string) => void;
   info: (message: string) => void;
+  warning: (message: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
@@ -28,6 +29,7 @@ const TOAST_CONFIG: Record<ToastType, { icon: IconName; color: string; bg: strin
   success: { icon: "check", color: "var(--color-success)", bg: "var(--color-success-bg)" },
   error: { icon: "alert", color: "var(--color-danger)", bg: "var(--color-danger-bg)" },
   info: { icon: "info", color: "var(--color-info)", bg: "var(--color-info-bg)" },
+  warning: { icon: "alert", color: "var(--color-warning)", bg: "var(--color-warning-bg)" },
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -46,6 +48,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     success: (msg) => show("success", msg),
     error: (msg) => show("error", msg),
     info: (msg) => show("info", msg),
+    warning: (msg) => show("warning", msg),
   };
 
   return (

@@ -9,9 +9,22 @@ import { Button } from "../components/Button";
 interface Props {
   data: ClanStatusDTO;
   onPlayerClick?: (tag: string) => void;
+  lastUpdated?: number;
+  onCollect?: () => void;
+  isCollecting?: boolean;
 }
 
-export default function Dashboard({ data, onPlayerClick }: Props) {
+function formatLastUpdated(ts?: number): string | null {
+  if (!ts) return null;
+  const date = new Date(ts);
+  return date.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+export default function Dashboard({ data, onPlayerClick, lastUpdated, onCollect, isCollecting }: Props) {
   const players = data?.players ?? [];
 
   const statusCounts = players.reduce(
@@ -32,18 +45,36 @@ export default function Dashboard({ data, onPlayerClick }: Props) {
           <h2 className="text-xl font-bold text-[var(--color-text-primary)]">
             Corrida do Rio
           </h2>
-          {data.relaxed && (
-            <span
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[var(--radius-pill)] text-xs font-semibold"
-              style={{
-                backgroundColor: "var(--color-success-bg)",
-                color: "var(--color-success)",
-              }}
-            >
-              <Icon name="flag" size={12} />
-              Relaxado
-            </span>
-          )}
+          <div className="flex items-center gap-3">
+            {lastUpdated && (
+              <span className="text-xs text-[var(--color-text-tertiary)] tabular-nums">
+                Atualizado {formatLastUpdated(lastUpdated)}
+              </span>
+            )}
+            {onCollect && (
+              <Button
+                variant="ghost"
+                size="sm"
+                iconLeft="bolt"
+                onClick={onCollect}
+                disabled={isCollecting}
+              >
+                {isCollecting ? "Coletando..." : "Coletar"}
+              </Button>
+            )}
+            {data.relaxed && (
+              <span
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-[var(--radius-pill)] text-xs font-semibold"
+                style={{
+                  backgroundColor: "var(--color-success-bg)",
+                  color: "var(--color-success)",
+                }}
+              >
+                <Icon name="flag" size={12} />
+                Relaxado
+              </span>
+            )}
+          </div>
         </div>
         {data?.war_active ? (
           <>

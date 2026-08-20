@@ -22,10 +22,12 @@ function AppContent() {
   const queryClient = useQueryClient();
   const toast = useToast();
 
-  const { data, isLoading, error } = useQuery<ClanStatusDTO>({
+  const { data, isLoading, error, dataUpdatedAt, refetch } = useQuery<ClanStatusDTO>({
     queryKey: ["clanStatus", clanTag],
     queryFn: () => api.getClanStatus(clanTag || undefined),
     enabled: page === "dashboard" || page === "config",
+    refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
+    refetchOnWindowFocus: true,
   });
 
   const evalMutation = useMutation({
@@ -38,6 +40,25 @@ function AppContent() {
     },
     onError: () => {
       toast.error("Erro ao avaliar o clã. Verifique a configuração.");
+    },
+  });
+
+  const collectMutation = useMutation({
+    mutationFn: () => api.collectSnapshot(clanTag || undefined),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["clanStatus", clanTag] });
+      if (result.status === "success") {
+        toast.success(
+          `Snapshot coletado: ${result.participants_captured} jogadores · ${result.snapshot_date}`
+        );
+      } else if (result.status === "no_war") {
+        toast.info("Nenhuma guerra ativa no momento");
+      } else {
+        toast.warning(`Coleta: ${result.status}${result.error ? ` — ${result.error}` : ""}`);
+      }
+    },
+    onError: () => {
+      toast.error("Erro ao coletar snapshot.");
     },
   });
 
@@ -175,6 +196,9 @@ function AppContent() {
       <Dashboard
         data={data ?? { war_active: false, war_id: null, day: null, day_label: null, status: null, position: null, total_fame: 0, daily_fame: 0, clans_count: 0, relaxed: false, players: [] as ClanStatusDTO["players"] }}
         onPlayerClick={handlePlayerClick}
+        lastUpdated={dataUpdatedAt}
+        onCollect={() => collectMutation.mutate()}
+        isCollecting={collectMutation.isPending}
       />
     </Layout>
   );
