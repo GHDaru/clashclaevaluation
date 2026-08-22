@@ -3,6 +3,7 @@
 All endpoints are wired to use cases via dependency injection.
 """
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -65,7 +66,23 @@ async def get_clan_status(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    result = await use_case.execute(clan_tag_obj)
+    try:
+        result = await use_case.execute(clan_tag_obj)
+    except httpx.HTTPStatusError as e:
+        # CR API returned an error — return details so the client can diagnose
+        try:
+            cr_error = e.response.json()
+        except Exception:
+            cr_error = {"message": e.response.text}
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "cr_api_error",
+                "cr_status_code": e.response.status_code,
+                "cr_error": cr_error,
+                "url": str(e.request.url),
+            },
+        )
     return {
         "war_active": result.war_active,
         "war_id": result.war_id,
